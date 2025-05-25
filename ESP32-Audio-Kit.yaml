@@ -1,0 +1,396 @@
+# ESP32-A1S V2.2 Audio Kit
+substitutions:
+  name: "audio-living-room"
+  friendly_name: Audio Living Room
+  ap_ssid: "Audio Living Room"
+  encryption_key: !secret Encryption_Key_Audio_Living_Room    # Find in your secrets file
+  ota_password: !secret OTA_Password_Audio_Living_Room        # Not used by everyone, but if used...move it to your secrets file
+  
+
+# PINS
+# GPIO0     Pin in Header; RST; DTR/RTS
+# GPIO02    SD_DATA0; RTS/DTR
+# GPIO04    SD_DATA1
+# GPIO05    Key 6
+# GPIO12    Microphone Jack Detect; SD_DATA2; JT_MTDI
+# GPIO13    Key 2; SD_DATA3; JT_MTCK (switchable via 1, 2 & 4)
+# GPIO14    SD_CLK; JT_MTMS
+# GPIO15    SD_CMD; JT_MTDO (switchable via 3 & 5)
+# GPIO18    Key 5
+# GPIO19    Key 3; LED5 (shared argh)
+# GPIO21    Amp Shutdown (pull down default?)
+# GPIO22    LED4
+# GPIO23    Key 4
+# GPIO25    I2S Left/Right Clock
+# GPIO26    I2S Data Out
+# GPIO27    I2S Background Clock
+# GPIO32    SCL
+# GPIO33    SDA
+# GPIO35    Analog/I2S Microphone
+# GPIO36    Key 1
+# GPIO39    Headphones Jack Detect
+
+
+esphome:
+  name: ${name}
+  friendly_name: ${friendly_name}
+  min_version: 2024.6.0
+  name_add_mac_suffix: false
+  
+esp32:
+  board: esp-wrover-kit
+  framework:
+    type: arduino
+
+# Enable logging
+logger:
+#  level: debug
+
+# Enable Home Assistant API
+api:
+  encryption:
+    key: ${encryption_key}
+
+# Allow Over-The-Air updates
+ota:
+- platform: esphome
+  password: ${ota_password}
+  
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  
+ # Enable fallback hotspot (captive portal) in case wifi connection fails
+  ap:
+    ssid: ${ap_ssid}
+    password: !secret wifi_password
+
+captive_portal:
+
+#**************************************
+    
+i2c:
+  id: i2c_base            # Technically this isn't needed if you don't use in the es8388 and i2c_device components. Usually it's only defined if you have more than one I2C bus and need to differentiate.
+  sda: GPIO33
+  scl: GPIO32
+  #scan: true             # My scan results in just the 0x10 device which is the es8388. If you somehow add I2C devices you can remark this back out to scan the bus.
+
+i2s_audio:
+  - id: i2s_audio_bus
+    i2s_lrclk_pin: GPIO25
+    i2s_bclk_pin: GPIO27
+
+#audio_dac:
+#  - platform: ES8388     # ESPHome currently (01-09-2025) supports only ES8311 and AIC3204 (not sure how similar an ES8311 is to an ES8388), if they do ever support it directly...this is where it would go
+
+# ES8388 low power low cost audio codec
+external_components:
+  - source: github://pr#3552
+    components: [es8388]
+    refresh: 0s
+
+es8388:
+  i2c_id: i2c_base
+  #address: 0x10
+
+# Let the es8388 module above do the heavy lifting (setup, etc). Then create a custom I2C device (to the es8388 chip) for local control.
+i2c_device:
+  id: local_es8388
+  i2c_id: i2c_base
+  address: 0x10
+
+# Most of the ESP32-A1S boards have the capacitor for the microphone placed in the wrong location (it is placed for the I2S microphone even though the analog microphones have been soldered in place)
+# Before remarking out the below and using it (in voice assistant for example), you will need to switch those capacitors or figure out a way to activate the line-in port
+#microphone:
+#  - platform: i2s_audio
+#    id: media_mic
+#    i2s_din_pin: GPIO35
+#    adc_type: external
+#    pdm: false
+
+media_player:
+  - platform: i2s_audio
+    id: media_out
+    name: None  #"ESP32 Audio Kit"
+    i2s_dout_pin: GPIO26
+    dac_type: external
+    mode: stereo
+#    mute_pin:
+#      number: GPIO21
+#      inverted: true
+
+# NOTE: This lambda would be MUCH easier if defined in a function in a .h file and then just called here with the I2C component.
+# But for making this readily shareable so someone can just copy/paste this into their own project it is done here.
+# If you know how to move this code into it's own .h file I would recommend that just for clean/clear code
+switch:
+  - platform: template
+    id: aux_output
+    name: "Aux Output"
+    restore_mode: RESTORE_DEFAULT_OFF
+    optimistic: True
+    on_turn_on:       # Turn on Line 2 (Aux), turn off Line 1 (Speakers)
+      - lambda: !lambda |-
+          if (id(headphone_jack_status).state == false)   // If aux cable is not plugged in, why are we changing to aux output??
+          {
+            id(aux_output).publish_state(false);
+          }
+          else
+          {
+            const uint8_t output_cmd = 0x0C;      // DAC turn on Line 2, turn off Line 1
+            const uint8_t unmute_cmd = 0x00;
+            const uint8_t mute_cmd = 0x04;
+            const uint8_t volume_min_cmd = 0x00;
+            const uint8_t volume_max_cmd = 0x21;      // 0x21 is true MAX at 4.5dB; 0x1F is 1.5dB; Original was 0x1C which is -3dB
+            // Registers
+            const uint8_t Power_Reg = 0x04;
+            const uint8_t Control3_Reg = 0x19;
+            // I2C Pointer to local I2C es8388 component
+            i2c::I2CDevice* pI2C = id(local_es8388);
+            // Mute (prevent popping?)
+            pI2C->write_byte(Control3_Reg, mute_cmd);
+            // Line 1 DAC volume min...probably not necessary, but since we are turning line 2 to max, might as well turn line 1 down
+            pI2C->write_byte(0x2E, volume_min_cmd);
+            pI2C->write_byte(0x2F, volume_min_cmd);
+            // DAC turn on Line 2, turn off Line 1
+            pI2C->write_byte(Power_Reg, output_cmd);
+            // Line 2 DAC volume max...this is not done in the base es8388 initialization so we need to do it here
+            pI2C->write_byte(0x30, volume_max_cmd);
+            pI2C->write_byte(0x31, volume_max_cmd);
+            // Unmute
+            pI2C->write_byte(Control3_Reg, unmute_cmd);
+          }
+    on_turn_off:      # Turn on Line 1 (Speakers), turn off Line 2 (Aux)
+      - lambda: !lambda |-
+          const uint8_t output_cmd = 0x30;      // DAC turn on Line 2, turn off Line 1
+          const uint8_t unmute_cmd = 0x00;
+          const uint8_t mute_cmd = 0x04;
+          const uint8_t volume_min_cmd = 0x00;
+          const uint8_t volume_max_cmd = 0x1C;
+          // Registers
+          const uint8_t Power_Reg = 0x04;
+          const uint8_t Control3_Reg = 0x19;
+          // I2C Pointer to local I2C es8388 component
+          i2c::I2CDevice* pI2C = id(local_es8388);
+          // Mute (prevent popping?)
+          pI2C->write_byte(Control3_Reg, mute_cmd);
+          // Line 2 DAC volume min...probably not necessary, but since we are turning line 1 to max, might as well turn line 2 down
+          pI2C->write_byte(0x30, volume_min_cmd);
+          pI2C->write_byte(0x31, volume_min_cmd);
+          // DAC turn on Line 2, turn off Line 1
+          pI2C->write_byte(Power_Reg, output_cmd);
+          // Line 1 DAC volume max...since we turn it down in the on_turn_on event above we need to turn it back to max here
+          pI2C->write_byte(0x2E, volume_max_cmd);
+          pI2C->write_byte(0x2F, volume_max_cmd);
+          // Unmute
+          pI2C->write_byte(Control3_Reg, unmute_cmd);
+
+# NOTE: Mute didn't work in the media player??
+# This normally should be pulled into the media player via the [mute_pin] section in the [media_player] block
+# If you want to control it as a separate switch, unremark the below 4 lines and remark out the [mute_pin] section in the [media_player] block
+  - platform: gpio
+    pin: GPIO21
+    name: "AMP Switch"
+    restore_mode: ALWAYS_ON
+    
+binary_sensor:
+  - platform: gpio
+    id: headphone_jack_status
+    pin:
+      number: GPIO39
+      inverted: true
+      mode:
+        input: true
+    name: "Headphone Jack"
+#   Writing directly to the es8388 in on_state could be done, but then the Aux Output wouldn't get updated.
+#   By calling the state of the Aux Output with the state of the headphone jack instead, we can do both where
+#   we switch automatically but allow changing back and forth if the headphone's remain plugged in (and the aux_output remains in sync).
+#   If you DON'T want automatic switching when aux is plugged in, remark out the below 3 lines
+    on_state: 
+      - lambda: !lambda |-
+          id(aux_output).publish_state(id(headphone_jack_status).state);
+
+# If you need to know when the microphone jack is plugged in...
+#  - platform: gpio
+#    pin:
+#      number: GPIO12
+#      inverted: true
+#      mode:
+#        input: true
+#        pulldown: true
+#    name: "Microphone Jack"
+
+  - platform: gpio
+    pin:
+      number: GPIO36
+      inverted: true
+    name: "Key 1"
+    filters:
+      - delayed_off: 10ms
+
+  - platform: gpio
+    pin:
+      number: GPIO13
+      inverted: true
+    name: "Key 2"           # DIP switch 1 & 2 MUST be in the ON position to get Key2 to function correctly. Otherwise it just seems to always report pressed.
+    filters:
+      - delayed_off: 10ms
+
+  - platform: gpio
+    pin:
+      number: GPIO19
+      inverted: true
+    name: "Key 3"
+    filters:
+      - delayed_off: 10ms
+      
+  - platform: gpio
+    pin:
+      number: GPIO23
+      inverted: true
+      mode:
+        input: true
+        pullup: true
+    name: "Key 4"
+    filters:
+      - delayed_off: 10ms
+      
+  - platform: gpio
+    pin:
+      number: GPIO18
+      inverted: true
+      mode:
+        input: true
+        pullup: true
+    name: "Key 5"
+    filters:
+      - delayed_off: 10ms
+      
+  - platform: gpio
+    pin:
+      number: GPIO5
+      inverted: true
+      mode:
+        input: true
+        pullup: true
+    name: "Key 6"
+    filters:
+      - delayed_off: 10ms
+
+light:
+# LED 4 is described as a 'status_led' which allows it to double as a status led and a light led when not in an error/warning state.
+# Change platform to binary and add to the [output] block, like the LED 5 example, if you don't want it doubling as a status LED
+  - platform: status_led
+    name: "LED 4"
+    pin:
+      number: GPIO22
+      inverted: true
+
+# LED 5 is shared with Key 3. Unfortunately you cannot use both here since ESPHome will complain that GPIO19 has already been used!! So you need to choose between Key 3 OR LED 5.
+# IF you want to use LED 5, unremark the below stuff...
+#  - platform: binary
+#    name: "LED 5"
+#    output: led_5
+
+#output:
+#  - id: led_5
+#    platform: gpio
+#    pin: GPIO19
+#    inverted: true
+
+# Debugging/Status stuff... set 'disabled_by_default: true' if you don't want these showing up by default, remark/delete out to remove entirely
+debug:
+  update_interval: 5s
+
+sensor:
+  - platform: wifi_signal           # WiFi signal strength in dB; NOTE: This is needed if you want the WiFi signal strength in % variable below to be available.
+    name: "WiFi Signal"
+    id: wifi_signal_db
+    update_interval: 60s
+    #disabled_by_default: true
+
+  - platform: copy                  # Reports the above WiFi signal strength in %
+    source_id: wifi_signal_db
+    name: "WiFi Signal Strength"
+    filters:
+      - lambda: return min(max(2 * (x + 100.0), 0.0), 100.0);
+    unit_of_measurement: " %"
+    entity_category: "diagnostic"
+    device_class: ""
+    #disabled_by_default: true
+
+  - platform: uptime                # Seconds since last boot
+    name: "Uptime"
+    disabled_by_default: false
+    force_update: false
+    unit_of_measurement: s
+    icon: mdi:timer-outline
+    accuracy_decimals: 0
+    device_class: duration
+    state_class: total_increasing
+    entity_category: diagnostic
+    update_interval: 60s
+    #disabled_by_default: true
+
+#  - platform: debug
+#    free:
+#      name: "Heap Free"
+#      #disabled_by_default: true
+
+#    fragmentation:                 # Only available on ESP8266
+#      name: "Heap Fragmentation"
+#      #disabled_by_default: true
+
+#    block:
+#      name: "Heap Max Block"
+#      #disabled_by_default: true
+
+#    loop_time:
+#      name: "Loop Time"
+#      #disabled_by_default: true
+
+#    psram:                         # Only available on ESP32
+#      name: "Free PSRAM"
+#      #disabled_by_default: true
+
+text_sensor:
+  - platform: wifi_info
+    ip_address:
+      name: "IP"
+      icon: "mdi:ip-outline"
+      #disabled_by_default: true
+
+    ssid:
+      name: "SSID"
+      icon: "mdi:wifi-settings"
+      #disabled_by_default: true
+
+    bssid:
+      name: "BSSID"
+      icon: "mdi:wifi-settings"
+      #disabled_by_default: true
+
+    mac_address:
+      name: "MAC"
+      icon: "mdi:network-outline"
+      #disabled_by_default: true
+
+    scan_results:
+      name: "Wifi Scan"
+      icon: "mdi:wifi-refresh"
+      disabled_by_default: true   # This is just here...because it can be, so disable by default since you don't want this running all the time!
+
+  - platform: version
+    name: ${friendly_name} Version
+    hide_timestamp: true
+    disabled_by_default: false
+    icon: mdi:new-box
+    entity_category: diagnostic
+      #disabled_by_default: true
+
+#  - platform: debug
+#    device:
+#      name: "Device Info"
+#     #disabled_by_default: true
+#    reset_reason:
+#      name: "Reset Reason"
+#     #disabled_by_default: true

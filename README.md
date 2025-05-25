@@ -1,0 +1,1 @@
+Not entirely sure who the original creator was, but I picked it up from user wryandginger in the community Home Assistant post here https://community.home-assistant.io/t/esp32-a1s-audio-kit-media-player/522245 which I then modified and improved upon making it a complete solution.

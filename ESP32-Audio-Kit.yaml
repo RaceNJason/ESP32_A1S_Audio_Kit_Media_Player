@@ -1,11 +1,50 @@
 # ESP32-A1S V2.2 Audio Kit
 substitutions:
-  name: "audio-living-room"
-  friendly_name: Audio Living Room
-  ap_ssid: "Audio Living Room"
+  name:           "audio-living-room"
+  friendly_name:  Audio Living Room
+  ap_ssid:        "Audio Living Room"
   encryption_key: !secret Encryption_Key_Audio_Living_Room    # Find in your secrets file
-  ota_password: !secret OTA_Password_Audio_Living_Room        # Not used by everyone, but if used...move it to your secrets file
+  ota_password:   !secret OTA_Password_Audio_Living_Room        # Not used by everyone, but if used...move it to your secrets file
   
+  # NONE, ERROR, WARN, INFO, DEBUG, VERBOSE, VERY_VERBOSE
+  logger_level:           NONE
+  initial_logger_level:   DEBUG
+  debug_interval:         60s
+  
+  led4_pin:               GPIO22
+  led5_pin:               GPIO19
+  
+  key1_name:              "Key 1"
+  key2_name:              "Key 2"
+  key3_name:              "Key 3"
+  key4_name:              "Key 4"
+  key5_name:              "Key 5"
+  key6_name:              "Key 6"
+  key1_pin:               GPIO36
+  key2_pin:               GPIO13
+  key3_pin:               GPIO19
+  key4_pin:               GPIO23
+  key5_pin:               GPIO18
+  key6_pin:               GPIO05
+  key_delay_off:          10ms    # This is a hack that makes sure HA will get the message, otherwise HA ignores it because it toggles
+                                  # too rapidly. Change to 'Event' to properly fix. For now this is the easy fix.
+  
+  headphone_jack_pin:     GPIO39
+  microphone_jack_pin:    GPIO12
+  
+  i2s_lr_clk_pin:         GPIO25
+  i2s_data_pin:           GPIO26
+  i2s_clk_pin:            GPIO27
+  i2s_microphone_pin:     GPIO35
+  
+  sda_pin:                GPIO33
+  scl_pin:                GPIO32
+  
+  amp_switch_pin:         GPIO21
+  mute_pin:               GPIO21
+  amp_switch_name:        "AMP Switch"
+  
+  aux_output_name:        "Aux Output"
 
 # PINS
 # GPIO0     Pin in Header; RST; DTR/RTS
@@ -44,7 +83,8 @@ esp32:
 
 # Enable logging
 logger:
-#  level: debug
+  level: ${logger_level}
+#  initial_level: ${initial_logger_level}
 
 # Enable Home Assistant API
 api:
@@ -71,14 +111,14 @@ captive_portal:
     
 i2c:
   id: i2c_base            # Technically this isn't needed if you don't use in the es8388 and i2c_device components. Usually it's only defined if you have more than one I2C bus and need to differentiate.
-  sda: GPIO33
-  scl: GPIO32
+  sda: ${sda_pin}
+  scl: ${scl_pin}
   #scan: true             # My scan results in just the 0x10 device which is the es8388. If you somehow add I2C devices you can remark this back out to scan the bus.
 
 i2s_audio:
   - id: i2s_audio_bus
-    i2s_lrclk_pin: GPIO25
-    i2s_bclk_pin: GPIO27
+    i2s_lrclk_pin: ${i2s_lr_clk_pin}
+    i2s_bclk_pin: ${i2s_clk_pin}
 
 #audio_dac:
 #  - platform: ES8388     # ESPHome currently (01-09-2025) supports only ES8311 and AIC3204 (not sure how similar an ES8311 is to an ES8388), if they do ever support it directly...this is where it would go
@@ -104,7 +144,7 @@ i2c_device:
 #microphone:
 #  - platform: i2s_audio
 #    id: media_mic
-#    i2s_din_pin: GPIO35
+#    i2s_din_pin: ${i2s_microphone_pin}
 #    adc_type: external
 #    pdm: false
 
@@ -112,11 +152,11 @@ media_player:
   - platform: i2s_audio
     id: media_out
     name: None  #"ESP32 Audio Kit"
-    i2s_dout_pin: GPIO26
+    i2s_dout_pin: ${i2s_data_pin}
     dac_type: external
     mode: stereo
 #    mute_pin:
-#      number: GPIO21
+#      number: ${mute_pin}
 #      inverted: true
 
 # NOTE: This lambda would be MUCH easier if defined in a function in a .h file and then just called here with the I2C component.
@@ -125,7 +165,7 @@ media_player:
 switch:
   - platform: template
     id: aux_output
-    name: "Aux Output"
+    name: ${aux_output_name}
     restore_mode: RESTORE_DEFAULT_OFF
     optimistic: True
     on_turn_on:       # Turn on Line 2 (Aux), turn off Line 1 (Speakers)
@@ -188,15 +228,15 @@ switch:
 # This normally should be pulled into the media player via the [mute_pin] section in the [media_player] block
 # If you want to control it as a separate switch, unremark the below 4 lines and remark out the [mute_pin] section in the [media_player] block
   - platform: gpio
-    pin: GPIO21
-    name: "AMP Switch"
+    pin: ${amp_switch_pin}
+    name: ${amp_switch_name}
     restore_mode: ALWAYS_ON
     
 binary_sensor:
   - platform: gpio
     id: headphone_jack_status
     pin:
-      number: GPIO39
+      number: ${headphone_jack_pin}
       inverted: true
       mode:
         input: true
@@ -212,7 +252,7 @@ binary_sensor:
 # If you need to know when the microphone jack is plugged in...
 #  - platform: gpio
 #    pin:
-#      number: GPIO12
+#      number: ${microphone_jack_pin}
 #      inverted: true
 #      mode:
 #        input: true
@@ -221,60 +261,69 @@ binary_sensor:
 
   - platform: gpio
     pin:
-      number: GPIO36
+      number: ${key1_pin}
       inverted: true
-    name: "Key 1"
+      mode:
+        input: true
+        #pullup: true GPIO36 (34-39) does not support pullups
+    name: ${key1_name}
     filters:
-      - delayed_off: 10ms
+      - delayed_off: ${key_delay_off}
 
   - platform: gpio
     pin:
-      number: GPIO13
+      number: ${key2_pin}
       inverted: true
-    name: "Key 2"           # DIP switch 1 & 2 MUST be in the ON position to get Key2 to function correctly. Otherwise it just seems to always report pressed.
+      mode:
+        input: true
+        pullup: true
+    name: ${key2_name}           # DIP switch 1 & 2 MUST be in the ON position to get Key2 to function correctly. Otherwise it just seems to always report pressed.
     filters:
-      - delayed_off: 10ms
+      - delayed_off: ${key_delay_off}
 
   - platform: gpio
     pin:
-      number: GPIO19
-      inverted: true
-    name: "Key 3"
-    filters:
-      - delayed_off: 10ms
-      
-  - platform: gpio
-    pin:
-      number: GPIO23
+      number: ${key3_pin}
       inverted: true
       mode:
         input: true
         pullup: true
-    name: "Key 4"
+    name: ${key3_name}
     filters:
-      - delayed_off: 10ms
+      - delayed_off: ${key_delay_off}
       
   - platform: gpio
     pin:
-      number: GPIO18
+      number: ${key4_pin}
       inverted: true
       mode:
         input: true
         pullup: true
-    name: "Key 5"
+    name: ${key4_name}
     filters:
-      - delayed_off: 10ms
+      - delayed_off: ${key_delay_off}
       
   - platform: gpio
     pin:
-      number: GPIO5
+      number: ${key5_pin}
       inverted: true
       mode:
         input: true
         pullup: true
-    name: "Key 6"
+    name: ${key5_name}
     filters:
-      - delayed_off: 10ms
+      - delayed_off: ${key_delay_off}
+      
+  - platform: gpio
+    pin:
+      number: ${key6_pin}
+      inverted: true
+      mode:
+        input: true
+        pullup: true
+    name: ${key6_name}
+    filters:
+      - delayed_off: ${key_delay_off}
 
 light:
 # LED 4 is described as a 'status_led' which allows it to double as a status led and a light led when not in an error/warning state.
@@ -282,7 +331,7 @@ light:
   - platform: status_led
     name: "LED 4"
     pin:
-      number: GPIO22
+      number: ${led4_pin}
       inverted: true
 
 # LED 5 is shared with Key 3. Unfortunately you cannot use both here since ESPHome will complain that GPIO19 has already been used!! So you need to choose between Key 3 OR LED 5.
@@ -294,19 +343,19 @@ light:
 #output:
 #  - id: led_5
 #    platform: gpio
-#    pin: GPIO19
+#    pin: ${led5_pin}
 #    inverted: true
 
 # Debugging/Status stuff... set 'disabled_by_default: true' if you don't want these showing up by default, remark/delete out to remove entirely
 debug:
-  update_interval: 5s
+  update_interval: ${debug_interval}
 
 sensor:
   - platform: wifi_signal           # WiFi signal strength in dB; NOTE: This is needed if you want the WiFi signal strength in % variable below to be available.
     name: "WiFi Signal"
     id: wifi_signal_db
-    update_interval: 60s
-    #disabled_by_default: true
+    update_interval: ${debug_interval}
+    disabled_by_default: true
 
   - platform: copy                  # Reports the above WiFi signal strength in %
     source_id: wifi_signal_db
@@ -316,11 +365,10 @@ sensor:
     unit_of_measurement: " %"
     entity_category: "diagnostic"
     device_class: ""
-    #disabled_by_default: true
+    disabled_by_default: true
 
   - platform: uptime                # Seconds since last boot
     name: "Uptime"
-    disabled_by_default: false
     force_update: false
     unit_of_measurement: s
     icon: mdi:timer-outline
@@ -328,8 +376,8 @@ sensor:
     device_class: duration
     state_class: total_increasing
     entity_category: diagnostic
-    update_interval: 60s
-    #disabled_by_default: true
+    update_interval: ${debug_interval}
+    disabled_by_default: true
 
 #  - platform: debug
 #    free:
@@ -354,43 +402,42 @@ sensor:
 
 text_sensor:
   - platform: wifi_info
-    ip_address:
-      name: "IP"
-      icon: "mdi:ip-outline"
-      #disabled_by_default: true
+#    ip_address:
+#      name: "IP"
+#      icon: "mdi:ip-outline"
+#      disabled_by_default: true
 
-    ssid:
-      name: "SSID"
-      icon: "mdi:wifi-settings"
-      #disabled_by_default: true
+#    ssid:
+#      name: "SSID"
+#      icon: "mdi:wifi-settings"
+#      disabled_by_default: true
 
-    bssid:
-      name: "BSSID"
-      icon: "mdi:wifi-settings"
-      #disabled_by_default: true
+#    bssid:
+#      name: "BSSID"
+#      icon: "mdi:wifi-settings"
+#      disabled_by_default: true
 
     mac_address:
       name: "MAC"
       icon: "mdi:network-outline"
-      #disabled_by_default: true
+      disabled_by_default: true
 
-    scan_results:
-      name: "Wifi Scan"
-      icon: "mdi:wifi-refresh"
-      disabled_by_default: true   # This is just here...because it can be, so disable by default since you don't want this running all the time!
+#    scan_results:
+#      name: "Wifi Scan"
+#      icon: "mdi:wifi-refresh"
+#      disabled_by_default: true   # This is just here...because it can be, so disable by default since you don't want this running all the time!
 
   - platform: version
     name: ${friendly_name} Version
     hide_timestamp: true
-    disabled_by_default: false
     icon: mdi:new-box
     entity_category: diagnostic
-      #disabled_by_default: true
+    disabled_by_default: true
 
 #  - platform: debug
 #    device:
 #      name: "Device Info"
-#     #disabled_by_default: true
+#      disabled_by_default: true
 #    reset_reason:
 #      name: "Reset Reason"
-#     #disabled_by_default: true
+#      disabled_by_default: true

@@ -4,7 +4,7 @@ substitutions:
   friendly_name:  Audio Living Room
   ap_ssid:        "Audio Living Room"
   encryption_key: !secret Encryption_Key_Audio_Living_Room    # Find in your secrets file
-  ota_password:   !secret OTA_Password_Audio_Living_Room        # Not used by everyone, but if used...move it to your secrets file
+  ota_password:   !secret OTA_Password_Audio_Living_Room      # Not used by everyone, but if used...move it to your secrets file
   
   # NONE, ERROR, WARN, INFO, DEBUG, VERBOSE, VERY_VERBOSE
   logger_level:           NONE
@@ -20,6 +20,12 @@ substitutions:
   key4_name:              "Key 4"
   key5_name:              "Key 5"
   key6_name:              "Key 6"
+  key1_event:             esphome.audio_living_room.key1
+  key2_event:             esphome.audio_living_room.key2
+  key3_event:             esphome.audio_living_room.key3
+  key4_event:             esphome.audio_living_room.key4
+  key5_event:             esphome.audio_living_room.key5
+  key6_event:             esphome.audio_living_room.key6
   key1_pin:               GPIO36
   key2_pin:               GPIO13
   key3_pin:               GPIO19
@@ -27,7 +33,7 @@ substitutions:
   key5_pin:               GPIO18
   key6_pin:               GPIO05
   key_delay_off:          10ms    # This is a hack that makes sure HA will get the message, otherwise HA ignores it because it toggles
-                                  # too rapidly. Change to 'Event' to properly fix. For now this is the easy fix.
+                                  # too rapidly. Added 'Event' calls to properly fix.
   
   headphone_jack_pin:     GPIO39
   microphone_jack_pin:    GPIO12
@@ -271,6 +277,9 @@ binary_sensor:
     name: ${key1_name}
     filters:
       - delayed_off: ${key_delay_off}
+    on_press:
+     - homeassistant.event:
+        event: ${key1_event}
 
   - platform: gpio
     pin:
@@ -282,6 +291,9 @@ binary_sensor:
     name: ${key2_name}           # DIP switch 1 & 2 MUST be in the ON position to get Key2 to function correctly. Otherwise it just seems to always report pressed.
     filters:
       - delayed_off: ${key_delay_off}
+    on_press:
+     - homeassistant.event:
+        event: ${key2_event}
 
   - platform: gpio
     pin:
@@ -293,6 +305,9 @@ binary_sensor:
     name: ${key3_name}
     filters:
       - delayed_off: ${key_delay_off}
+    on_press:
+     - homeassistant.event:
+        event: ${key3_event}
       
   - platform: gpio
     pin:
@@ -304,6 +319,9 @@ binary_sensor:
     name: ${key4_name}
     filters:
       - delayed_off: ${key_delay_off}
+    on_press:
+     - homeassistant.event:
+        event: ${key4_event}
       
   - platform: gpio
     pin:
@@ -315,6 +333,9 @@ binary_sensor:
     name: ${key5_name}
     filters:
       - delayed_off: ${key_delay_off}
+    on_press:
+     - homeassistant.event:
+        event: ${key5_event}
       
   - platform: gpio
     pin:
@@ -326,6 +347,9 @@ binary_sensor:
     name: ${key6_name}
     filters:
       - delayed_off: ${key_delay_off}
+    on_press:
+     - homeassistant.event:
+        event: esphome.audio_living_room.key6
 
 light:
 # LED 4 is described as a 'status_led' which allows it to double as a status led and a light led when not in an error/warning state.
@@ -351,6 +375,24 @@ light:
 # Debugging/Status stuff... set 'disabled_by_default: true' if you don't want these showing up by default, remark/delete out to remove entirely
 debug:
   update_interval: ${debug_interval}
+
+button:
+  - platform: restart
+    name: Restart ${friendly_name}
+    icon: mdi:restart
+    entity_category: diagnostic
+    
+  - platform: factory_reset
+    name: Reset ${friendly_name}
+    icon: mdi:heart-broken
+    disabled_by_default: true
+    entity_category: diagnostic
+    
+  - platform: shutdown
+    name: Shutdown ${friendly_name}
+    icon: mdi:power
+    disabled_by_default: true
+    entity_category: diagnostic
 
 sensor:
   - platform: wifi_signal           # WiFi signal strength in dB; NOTE: This is needed if you want the WiFi signal strength in % variable below to be available.

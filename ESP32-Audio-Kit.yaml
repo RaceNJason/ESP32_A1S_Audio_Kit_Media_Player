@@ -133,7 +133,7 @@ i2s_audio:
 
 # ES8388 low power low cost audio codec
 external_components:
-  - source: github://pr#3552
+  - source: github://pr#6956
     components: [es8388]
     refresh: 0s
 
